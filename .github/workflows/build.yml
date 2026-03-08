@@ -1,0 +1,34 @@
+name: Reusable Build
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: false
+        type: string
+        default: test
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Build
+        run: make build

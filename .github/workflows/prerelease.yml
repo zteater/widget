@@ -1,0 +1,61 @@
+name: Reusable Pre-release
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: false
+        type: string
+        default: test
+      tag:
+        required: true
+        type: string
+      title:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+      commit_range:
+        required: true
+        type: string
+      intro:
+        required: true
+        type: string
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.sha }}
+
+      - name: Generate prerelease notes
+        uses: ./.github/actions/conventional-release-notes
+        with:
+          notes_title: Pre-release Notes
+          intro: ${{ inputs.intro }}
+          commit_range: ${{ inputs.commit_range }}
+          output_file: prerelease-notes.md
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ inputs.tag }}" >/dev/null 2>&1; then
+            gh release edit "${{ inputs.tag }}" \
+              --title "${{ inputs.title }}" \
+              --notes-file prerelease-notes.md \
+              --prerelease
+          else
+            gh release create "${{ inputs.tag }}" \
+              --target "${{ inputs.sha }}" \
+              --title "${{ inputs.title }}" \
+              --notes-file prerelease-notes.md \
+              --prerelease
+          fi

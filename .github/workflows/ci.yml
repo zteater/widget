@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      environment_name: test
+
+  version:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    uses: ./.github/workflows/version.yml
+    with:
+      environment_name: test
+      branch_name: ${{ github.ref_name }}
+    secrets: inherit
+
+  prerelease:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: version
+    uses: ./.github/workflows/prerelease.yml
+    with:
+      environment_name: test
+      tag: ${{ needs.version.outputs.tag }}
+      title: ${{ needs.version.outputs.prerelease_title }}
+      sha: ${{ needs.version.outputs.sha }}
+      commit_range: ${{ needs.version.outputs.commit_range }}
+      intro: ${{ needs.version.outputs.prerelease_intro }}
+    secrets: inherit
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - version
+      - prerelease
+    uses: ./.github/workflows/release.yml
+    with:
+      environment_name: prod
+      tag: ${{ needs.version.outputs.tag }}
+      title: ${{ needs.version.outputs.release_title }}
+      sha: ${{ needs.version.outputs.sha }}
+      commit_range: ${{ needs.version.outputs.commit_range }}
+      intro: ${{ needs.version.outputs.release_intro }}
+    secrets: inherit

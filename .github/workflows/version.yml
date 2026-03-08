@@ -1,0 +1,143 @@
+name: Reusable Version
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: false
+        type: string
+        default: test
+      branch_name:
+        required: true
+        type: string
+    outputs:
+      previous_tag:
+        description: Previous stable release tag
+        value: ${{ jobs.version.outputs.previous_tag }}
+      version:
+        description: Next semantic version
+        value: ${{ jobs.version.outputs.version }}
+      tag:
+        description: Stable release tag
+        value: ${{ jobs.version.outputs.tag }}
+      prerelease_title:
+        description: Pre-release title
+        value: ${{ jobs.version.outputs.prerelease_title }}
+      release_title:
+        description: Release title
+        value: ${{ jobs.version.outputs.release_title }}
+      sha:
+        description: Commit SHA after any version bump commit
+        value: ${{ jobs.version.outputs.sha }}
+      commit_range:
+        description: Commit range used for notes
+        value: ${{ jobs.version.outputs.commit_range }}
+      prerelease_intro:
+        description: Intro text for prerelease notes
+        value: ${{ jobs.version.outputs.prerelease_intro }}
+      release_intro:
+        description: Intro text for release notes
+        value: ${{ jobs.version.outputs.release_intro }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+    outputs:
+      previous_tag: ${{ steps.bump.outputs.previous_tag }}
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      prerelease_title: ${{ steps.bump.outputs.prerelease_title }}
+      release_title: ${{ steps.bump.outputs.release_title }}
+      sha: ${{ steps.bump.outputs.sha }}
+      commit_range: ${{ steps.bump.outputs.commit_range }}
+      prerelease_intro: ${{ steps.bump.outputs.prerelease_intro }}
+      release_intro: ${{ steps.bump.outputs.release_intro }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.branch_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Bump version from conventional commits
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          previous_tag="$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-version:refname | head -n 1 || true)"
+          if [ -n "$previous_tag" ]; then
+            commit_range="${previous_tag}..HEAD"
+            prerelease_intro="Changes since \`${previous_tag}\`."
+            release_intro="Changes since \`${previous_tag}\`."
+          else
+            commit_range="HEAD"
+            prerelease_intro="Initial pre-release notes."
+            release_intro="Initial release."
+          fi
+
+          current_version="$(grep '^version = ' pyproject.toml | cut -d '"' -f 2)"
+          subjects="$(git log "$commit_range" --format='%s')"
+          bodies="$(git log "$commit_range" --format='%b')"
+
+          if printf '%s\n%s\n' "$subjects" "$bodies" | grep -Eq 'BREAKING CHANGE:|^[a-z]+(\([^)]+\))?!:'; then
+            bump="major"
+          elif printf '%s\n' "$subjects" | grep -Eq '^feat(\([^)]+\))?:'; then
+            bump="minor"
+          else
+            bump="patch"
+          fi
+
+          IFS='.' read -r major minor patch <<< "$current_version"
+          case "$bump" in
+            major)
+              next_version="$((major + 1)).0.0"
+              ;;
+            minor)
+              next_version="${major}.$((minor + 1)).0"
+              ;;
+            patch)
+              next_version="${major}.${minor}.$((patch + 1))"
+              ;;
+          esac
+
+          perl -0pi -e 's/^version = ".*"$/version = "'"$next_version"'"/m' pyproject.toml
+          UV_CACHE_DIR=.uv-cache uv lock
+
+          git add pyproject.toml uv.lock
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(release): bump version to ${next_version} [skip ci]"
+            git push origin "HEAD:${{ inputs.branch_name }}"
+          fi
+
+          sha="$(git rev-parse HEAD)"
+          tag="v${next_version}"
+          prerelease_title="${tag}-rc.${GITHUB_RUN_NUMBER}"
+          release_title="${tag}"
+
+          {
+            printf 'previous_tag=%s\n' "$previous_tag"
+            printf 'version=%s\n' "$next_version"
+            printf 'tag=%s\n' "$tag"
+            printf 'prerelease_title=%s\n' "$prerelease_title"
+            printf 'release_title=%s\n' "$release_title"
+            printf 'sha=%s\n' "$sha"
+            printf 'commit_range=%s\n' "$commit_range"
+            printf 'prerelease_intro=%s\n' "$prerelease_intro"
+            printf 'release_intro=%s\n' "$release_intro"
+          } >> "$GITHUB_OUTPUT"

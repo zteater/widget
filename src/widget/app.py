@@ -1,3 +1,4 @@
+from importlib.metadata import version
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Response, status
@@ -5,7 +6,9 @@ from fastapi import FastAPI, HTTPException, Response, status
 from widget.models import Widget, WidgetCreate, WidgetUpdate
 from widget.store import WidgetStore
 
-app = FastAPI(title="widget", version="0.1.0")
+APP_VERSION = version("widget")
+
+app = FastAPI(title="widget", version=APP_VERSION)
 store = WidgetStore()
 
 

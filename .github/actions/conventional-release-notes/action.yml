@@ -1,0 +1,70 @@
+name: Conventional Release Notes
+description: Generate release notes from conventional commits
+
+inputs:
+  notes_title:
+    description: Top-level title for the notes document
+    required: true
+  intro:
+    description: Intro text shown under the title
+    required: true
+  commit_range:
+    description: Git commit range to inspect
+    required: true
+  output_file:
+    description: File to write the generated notes to
+    required: true
+  exclude_pattern:
+    description: Optional grep pattern for commits to exclude
+    required: false
+    default: '^chore\(release\): bump version to '
+
+runs:
+  using: composite
+  steps:
+    - name: Generate notes
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        notes_title="${{ inputs.notes_title }}"
+        intro="${{ inputs.intro }}"
+        commit_range="${{ inputs.commit_range }}"
+        output_file="${{ inputs.output_file }}"
+        exclude_pattern="${{ inputs.exclude_pattern }}"
+
+        all_commits="$(git log "$commit_range" --format='- %s (%h)' | grep -Ev "$exclude_pattern" || true)"
+
+        {
+          printf '# %s\n\n' "$notes_title"
+          printf '%s\n\n' "$intro"
+        } > "$output_file"
+
+        add_section() {
+          local heading="$1"
+          local pattern="$2"
+          local matches
+          matches="$(printf '%s\n' "$all_commits" | grep -E "^- ${pattern}" || true)"
+          if [ -n "$matches" ]; then
+            printf '## %s\n%s\n\n' "$heading" "$matches" >> "$output_file"
+          fi
+        }
+
+        add_section 'Features' 'feat(\([^)]+\))?!?:'
+        add_section 'Fixes' 'fix(\([^)]+\))?!?:'
+        add_section 'Performance' 'perf(\([^)]+\))?!?:'
+        add_section 'Refactors' 'refactor(\([^)]+\))?!?:'
+        add_section 'Documentation' 'docs(\([^)]+\))?!?:'
+        add_section 'Tests' 'test(\([^)]+\))?!?:'
+        add_section 'Build' 'build(\([^)]+\))?!?:'
+        add_section 'CI' 'ci(\([^)]+\))?!?:'
+        add_section 'Chores' 'chore(\([^)]+\))?!?:'
+
+        uncategorized="$(printf '%s\n' "$all_commits" | grep -Ev '^- (feat|fix|perf|refactor|docs|test|build|ci|chore)(\([^)]+\))?!?:' || true)"
+        if [ -n "$uncategorized" ]; then
+          printf '## Other\n%s\n\n' "$uncategorized" >> "$output_file"
+        fi
+
+        if ! grep -q '^## ' "$output_file"; then
+          printf '## Changes\n- No conventional commits found in this range.\n' >> "$output_file"
+        fi
