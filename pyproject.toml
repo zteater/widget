@@ -1,0 +1,28 @@
+[project]
+name = "widget"
+version = "0.1.0"
+description = "FastAPI widget service scaffolded with uv"
+authors = [
+    { name = "Zack Teater", email = "zteater@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135.1",
+    "uvicorn>=0.41.0",
+]
+
+[project.scripts]
+widget = "widget:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
