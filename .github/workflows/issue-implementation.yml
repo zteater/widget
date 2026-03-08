@@ -28,6 +28,9 @@ jobs:
           fetch-depth: 0
           ref: main
 
+      - name: Initialize implementation log
+        run: ': > implementation.log'
+
       - name: Collect issue conversation
         id: conversation
         uses: actions/github-script@v7
@@ -58,6 +61,7 @@ jobs:
           ISSUE_CONVERSATION: ${{ steps.conversation.outputs.conversation }}
         shell: bash
         run: |
+          exec > >(tee -a implementation.log) 2>&1
           set -euo pipefail
 
           prompt_file=".github/codex/prompts/issue-implement.md"
@@ -133,11 +137,18 @@ jobs:
       - name: Create implementation branch
         env:
           BRANCH_NAME: codex/issue-${{ github.event.issue.number }}
+        shell: bash
         run: |
+          exec > >(tee -a implementation.log) 2>&1
+          set -euo pipefail
           git checkout -B "$BRANCH_NAME"
 
       - name: Apply patch
-        run: git apply --reject --whitespace=fix codex.patch
+        shell: bash
+        run: |
+          exec > >(tee -a implementation.log) 2>&1
+          set -euo pipefail
+          git apply --reject --whitespace=fix codex.patch
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -148,7 +159,10 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Validate changes
+        shell: bash
         run: |
+          exec > >(tee -a implementation.log) 2>&1
+          set -euo pipefail
           uv sync --dev
           uv run python -m compileall src tests
           uv run pytest
@@ -156,7 +170,10 @@ jobs:
       - name: Commit changes
         env:
           BRANCH_NAME: codex/issue-${{ github.event.issue.number }}
+        shell: bash
         run: |
+          exec > >(tee -a implementation.log) 2>&1
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .
@@ -228,9 +245,22 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
+            const fs = require('fs');
+            let logTail = 'No implementation log captured.';
+            if (fs.existsSync('implementation.log')) {
+              const lines = fs.readFileSync('implementation.log', 'utf8').trim().split('\n');
+              logTail = lines.slice(-60).join('\n') || logTail;
+            }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: 'Implementation was approved, but the automated patch/apply/test flow failed. Check the workflow run logs for details. If the failure says the patch was invalid, the model did not return a usable git diff.',
+              body: [
+                'Implementation was approved, but the automated patch/apply/test flow failed.',
+                '',
+                'Recent failure output:',
+                '```text',
+                logTail,
+                '```',
+              ].join('\n'),
             })
