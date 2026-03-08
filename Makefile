@@ -1,4 +1,4 @@
-.PHONY: help install run test build h i r t b
+.PHONY: help install run test lint format build h i r t l f b
 
 help:
 	@printf "widget - FastAPI widget service\n\n"
@@ -9,6 +9,8 @@ help:
 	@printf "  install, i   Install app and dev dependencies\n"
 	@printf "  run, r       Run the API on localhost:8080\n"
 	@printf "  test, t      Run the test suite\n"
+	@printf "  lint, l      Run the linter\n"
+	@printf "  format, f    Format the codebase\n"
 	@printf "  build, b     Compile, test, and build distributions\n"
 
 h: help
@@ -28,7 +30,17 @@ test:
 
 t: test
 
-build:
+lint:
+	UV_CACHE_DIR=.uv-cache uv run ruff check .
+
+l: lint
+
+format:
+	UV_CACHE_DIR=.uv-cache uv run ruff format .
+
+f: format
+
+build: lint
 	UV_CACHE_DIR=.uv-cache uv run python -m compileall src tests
 	UV_CACHE_DIR=.uv-cache uv run pytest
 	UV_CACHE_DIR=.uv-cache uv build
