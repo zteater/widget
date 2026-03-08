@@ -1,5 +1,8 @@
 Review this repository and produce a concise response for the GitHub issue below.
 
+Use the issue title, issue body, and issue comments together as the full conversation context.
+If a later comment clarifies or changes the request, prefer the latest clarified intent.
+
 Requirements:
 - Do not propose code changes in this response.
 - Focus on understanding the likely scope, impacted areas, risks, and suggested steps.
