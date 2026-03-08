@@ -5,3 +5,6 @@ __pycache__/
 .coverage
 dist/
 *.egg-info/
+codex-edits.json
+codex-raw.txt
+repo-context.txt
