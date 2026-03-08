@@ -6,20 +6,55 @@ on:
       - opened
 
 permissions:
+  contents: read
   issues: write
 
+concurrency:
+  group: ${{ github.workflow }}-issue-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
 jobs:
-  acknowledge:
+  codex:
     runs-on: ubuntu-latest
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
 
     steps:
-      - name: Comment on new issue
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Run Codex issue planner
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          prompt: |
+            Follow the instructions in .github/codex/prompts/issue-plan.md.
+
+            Issue title: ${{ github.event.issue.title }}
+
+            Issue body:
+            ${{ github.event.issue.body || 'No issue body provided.' }}
+          output-file: codex-issue-plan.md
+          safety-strategy: drop-sudo
+          sandbox: read-only
+
+  post_plan:
+    runs-on: ubuntu-latest
+    needs: codex
+    if: needs.codex.outputs.final_message != ''
+
+    steps:
+      - name: Comment with Codex plan
         uses: actions/github-script@v7
         with:
+          github-token: ${{ github.token }}
           script: |
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: 'received',
+              body: process.env.CODEX_FINAL_MESSAGE,
             })
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.codex.outputs.final_message }}
