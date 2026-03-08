@@ -52,6 +52,51 @@ jobs:
             const conversation = lines.length > 0 ? lines.join('\n\n') : 'No comments yet.';
             core.setOutput('conversation', conversation);
 
+      - name: Collect repository context
+        id: repo_context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo 'Repository file tree:'
+            find . -maxdepth 4 -type f \
+              -not -path './.git/*' \
+              -not -path './.venv/*' \
+              -not -path './.uv-cache/*' \
+              -not -path './dist/*' \
+              -not -path './logs_*/*' \
+              | sort
+            echo
+
+            for file in AGENTS.md Makefile pyproject.toml .github/workflows/ci.yml .github/workflows/build.yml; do
+              if [ -f "$file" ]; then
+                echo "===== BEGIN FILE: $file ====="
+                sed -n '1,260p' "$file"
+                echo "===== END FILE: $file ====="
+                echo
+              fi
+            done
+          } > repo-context.txt
+
+          {
+            echo 'context<<EOF'
+            cat repo-context.txt
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Comment start
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: ':rocket: Implementation approved. Starting automated work now.',
+            })
+
       - name: Generate implementation patch with Codex
         id: codex
         env:
@@ -59,6 +104,7 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body || 'No issue body provided.' }}
           ISSUE_CONVERSATION: ${{ steps.conversation.outputs.conversation }}
+          REPO_CONTEXT: ${{ steps.repo_context.outputs.context }}
         shell: bash
         run: |
           exec > >(tee -a implementation.log) 2>&1
@@ -73,6 +119,7 @@ jobs:
             --arg issue_title "$ISSUE_TITLE" \
             --arg issue_body "$ISSUE_BODY" \
             --arg issue_conversation "$ISSUE_CONVERSATION" \
+            --arg repo_context "$REPO_CONTEXT" \
             '{
               model: $model,
               input: [
@@ -81,7 +128,11 @@ jobs:
                   content: [
                     {
                       type: "input_text",
-                      text: ($instructions + "\n\nIssue title: " + $issue_title + "\n\nIssue body:\n" + $issue_body + "\n\nIssue comments:\n" + $issue_conversation)
+                      text: ($instructions
+                        + "\n\nIssue title: " + $issue_title
+                        + "\n\nIssue body:\n" + $issue_body
+                        + "\n\nIssue comments:\n" + $issue_conversation
+                        + "\n\nRepository context:\n" + $repo_context)
                     }
                   ]
                 }
