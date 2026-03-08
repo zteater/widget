@@ -127,12 +127,19 @@ jobs:
 
           if ! grep -q '^diff --git ' codex.patch; then
             echo "Codex response did not contain a valid git patch header." >&2
-            echo "First 40 lines of raw output:" >&2
-            sed -n '1,40p' codex-raw.txt >&2
+            echo "First 80 lines of raw output:" >&2
+            sed -n '1,80p' codex-raw.txt >&2
             exit 1
           fi
 
-          git apply --check codex.patch
+          if ! git apply --check codex.patch; then
+            echo "git apply --check failed for extracted patch." >&2
+            echo "First 80 lines of extracted patch:" >&2
+            sed -n '1,80p' codex.patch >&2
+            echo "First 80 lines of raw model output:" >&2
+            sed -n '1,80p' codex-raw.txt >&2
+            exit 1
+          fi
 
       - name: Create implementation branch
         env:
@@ -249,7 +256,7 @@ jobs:
             let logTail = 'No implementation log captured.';
             if (fs.existsSync('implementation.log')) {
               const lines = fs.readFileSync('implementation.log', 'utf8').trim().split('\n');
-              logTail = lines.slice(-60).join('\n') || logTail;
+              logTail = lines.slice(-80).join('\n') || logTail;
             }
             await github.rest.issues.createComment({
               owner: context.repo.owner,
