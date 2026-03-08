@@ -47,6 +47,103 @@ jobs:
               content: 'eyes',
             })
 
+      - name: React to planning reply comment
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.reactions.createForIssueComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: context.payload.comment.id,
+              content: 'eyes',
+            })
+
+      - name: Link issue to project and set In Planning
+        uses: actions/github-script@v7
+        env:
+          PROJECT_ID: ${{ vars.GITHUB_PROJECT_ID || '' }}
+          PROJECT_STATUS_FIELD_ID: ${{ vars.GITHUB_PROJECT_STATUS_FIELD_ID || '' }}
+          PROJECT_STATUS_IN_PLANNING_OPTION_ID: ${{ vars.GITHUB_PROJECT_STATUS_IN_PLANNING_OPTION_ID || '' }}
+          PROJECT_TOKEN: ${{ secrets.PROJECT_TOKEN || '' }}
+        with:
+          github-token: ${{ env.PROJECT_TOKEN != '' && env.PROJECT_TOKEN || github.token }}
+          script: |
+            const projectId = process.env.PROJECT_ID;
+            const statusFieldId = process.env.PROJECT_STATUS_FIELD_ID;
+            const inPlanningOptionId = process.env.PROJECT_STATUS_IN_PLANNING_OPTION_ID;
+            const issueNodeId = context.payload.issue.node_id;
+
+            if (!projectId || !statusFieldId || !inPlanningOptionId) {
+              core.info('Project configuration is not set. Skipping project link/status update.');
+              return;
+            }
+
+            const projectQuery = `
+              query($projectId: ID!) {
+                node(id: $projectId) {
+                  ... on ProjectV2 {
+                    items(first: 100) {
+                      nodes {
+                        id
+                        content {
+                          ... on Issue {
+                            id
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            `;
+
+            const projectData = await github.graphql(projectQuery, { projectId });
+            const items = projectData.node?.items?.nodes || [];
+            let itemId = items.find((item) => item.content?.id === issueNodeId)?.id;
+
+            if (!itemId) {
+              const addMutation = `
+                mutation($projectId: ID!, $contentId: ID!) {
+                  addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+                    item {
+                      id
+                    }
+                  }
+                }
+              `;
+              const addResult = await github.graphql(addMutation, {
+                projectId,
+                contentId: issueNodeId,
+              });
+              itemId = addResult.addProjectV2ItemById.item.id;
+            }
+
+            const updateMutation = `
+              mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+                updateProjectV2ItemFieldValue(
+                  input: {
+                    projectId: $projectId
+                    itemId: $itemId
+                    fieldId: $fieldId
+                    value: { singleSelectOptionId: $optionId }
+                  }
+                ) {
+                  projectV2Item {
+                    id
+                  }
+                }
+              }
+            `;
+
+            await github.graphql(updateMutation, {
+              projectId,
+              itemId,
+              fieldId: statusFieldId,
+              optionId: inPlanningOptionId,
+            });
+
       - name: Collect issue conversation
         id: conversation
         uses: actions/github-script@v7
