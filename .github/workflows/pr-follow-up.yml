@@ -1,0 +1,391 @@
+name: PR Follow Up
+
+on:
+  issue_comment:
+    types:
+      - created
+  pull_request_review:
+    types:
+      - submitted
+  pull_request_review_comment:
+    types:
+      - created
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-follow-up-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  merge_on_approval:
+    if: |
+      github.event_name == 'pull_request_review' &&
+      github.event.review.state == 'approved' &&
+      github.event.review.user.login == 'zteater'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Merge approved pull request
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              merge_method: 'squash',
+            })
+
+  address_feedback:
+    if: |
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.issue.pull_request &&
+        github.event.comment.user.login == 'zteater'
+      ) ||
+      (
+        github.event_name == 'pull_request_review' &&
+        github.event.review.user.login == 'zteater' &&
+        github.event.review.state != 'approved'
+      ) ||
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        github.event.comment.user.login == 'zteater'
+      )
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve pull request number
+        id: pr_number
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: React to feedback
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            if (context.eventName === 'issue_comment') {
+              await github.rest.reactions.createForIssueComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes',
+              });
+            } else if (context.eventName === 'pull_request_review_comment') {
+              await github.rest.reactions.createForPullRequestReviewComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: context.payload.comment.id,
+                content: 'eyes',
+              });
+            }
+
+      - name: Collect pull request context
+        id: pr_context
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          result-encoding: string
+          script: |
+            const prNumber = Number('${{ steps.pr_number.outputs.number }}');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+
+            const { data: pull } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: prNumber,
+            });
+
+            const issueComments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+
+            const reviewComments = await github.paginate(github.rest.pulls.listReviewComments, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number: prNumber,
+              per_page: 100,
+            });
+
+            const issueBody = pull.body?.trim() || '[no pull request body]';
+            const issueLines = issueComments.map((comment) => {
+              const body = (comment.body || '').trim() || '[no comment body]';
+              return [`- ${comment.user.login}:`, body].join('\n');
+            });
+            const reviewCommentLines = reviewComments.map((comment) => {
+              const body = (comment.body || '').trim() || '[no comment body]';
+              return [`- ${comment.user.login} on ${comment.path}:${comment.line || comment.original_line || 'n/a'}:`, body].join('\n');
+            });
+            const reviewLines = reviews.map((review) => {
+              const body = (review.body || '').trim() || '[no review body]';
+              return [`- ${review.user.login} (${review.state}):`, body].join('\n');
+            });
+
+            core.setOutput('head_ref', pull.head.ref);
+            core.setOutput('head_sha', pull.head.sha);
+            core.setOutput('base_ref', pull.base.ref);
+            return [
+              `PR title: ${pull.title}`,
+              '',
+              'PR body:',
+              issueBody,
+              '',
+              'PR comments:',
+              issueLines.length > 0 ? issueLines.join('\n\n') : 'No PR comments yet.',
+              '',
+              'Review comments:',
+              reviewCommentLines.length > 0 ? reviewCommentLines.join('\n\n') : 'No review comments yet.',
+              '',
+              'Reviews:',
+              reviewLines.length > 0 ? reviewLines.join('\n\n') : 'No reviews yet.',
+            ].join('\n');
+
+      - name: Check out pull request branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.pr_context.outputs.head_ref }}
+
+      - name: Initialize follow-up log
+        run: ': > pr-follow-up.log'
+
+      - name: Collect repository context
+        id: repo_context
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            echo 'Repository file tree:'
+            find . -maxdepth 4 -type f \
+              -not -path './.git/*' \
+              -not -path './.venv/*' \
+              -not -path './.uv-cache/*' \
+              -not -path './dist/*' \
+              | sort
+            echo
+
+            for file in AGENTS.md Makefile pyproject.toml .github/workflows/ci.yml .github/workflows/build.yml; do
+              if [ -f "$file" ]; then
+                echo "===== BEGIN FILE: $file ====="
+                sed -n '1,260p' "$file"
+                echo "===== END FILE: $file ====="
+                echo
+              fi
+            done
+          } > repo-context.txt
+
+          {
+            echo 'context<<EOF'
+            cat repo-context.txt
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate follow-up edits with Codex
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          PR_CONTEXT: ${{ steps.pr_context.outputs.result }}
+          REPO_CONTEXT: ${{ steps.repo_context.outputs.context }}
+        shell: bash
+        run: |
+          exec > >(tee -a pr-follow-up.log) 2>&1
+          set -euo pipefail
+
+          prompt_file=".github/codex/prompts/pr-follow-up.md"
+          instructions="$(cat "$prompt_file")"
+
+          response_json="$(jq -n \
+            --arg model "gpt-5.2-codex" \
+            --arg instructions "$instructions" \
+            --arg pr_context "$PR_CONTEXT" \
+            --arg repo_context "$REPO_CONTEXT" \
+            '{
+              model: $model,
+              input: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "input_text",
+                      text: ($instructions
+                        + "\n\nPull request context:\n" + $pr_context
+                        + "\n\nRepository context:\n" + $repo_context)
+                    }
+                  ]
+                }
+              ]
+            }')"
+
+          api_response="$(curl -sS https://api.openai.com/v1/responses \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer $OPENAI_API_KEY" \
+            -d "$response_json")"
+
+          raw_text="$(printf '%s' "$api_response" | jq -r '[.output[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n\n")')"
+
+          if [ -z "$raw_text" ] || [ "$raw_text" = "null" ]; then
+            echo "OpenAI response did not contain edit instructions" >&2
+            printf '%s\n' "$api_response" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "$raw_text" > codex-raw.txt
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          raw = Path('codex-raw.txt').read_text().strip()
+          if raw.startswith('```'):
+              lines = raw.splitlines()
+              if lines and lines[0].startswith('```'):
+                  lines = lines[1:]
+              if lines and lines[-1].startswith('```'):
+                  lines = lines[:-1]
+              raw = '\n'.join(lines).strip()
+
+          data = json.loads(raw)
+          edits = data.get('edits', [])
+          if not isinstance(edits, list):
+              raise SystemExit('JSON response must contain an edits array.')
+
+          normalized = []
+          for index, edit in enumerate(edits, start=1):
+              if not isinstance(edit, dict):
+                  raise SystemExit(f'Edit #{index} must be an object.')
+              path = edit.get('path')
+              action = edit.get('action')
+              content = edit.get('content')
+              if not path or not isinstance(path, str):
+                  raise SystemExit(f'Edit #{index} is missing a valid path.')
+              if action != 'write':
+                  raise SystemExit(f'Edit #{index} must use action "write".')
+              if not isinstance(content, str):
+                  raise SystemExit(f'Edit #{index} is missing string content.')
+              normalized.append({'path': path, 'content': content})
+
+          Path('codex-edits.json').write_text(json.dumps({'edits': normalized}, indent=2) + '\n')
+          PY
+
+          echo 'Generated edit plan:'
+          sed -n '1,120p' codex-edits.json
+
+      - name: Apply edits
+        shell: bash
+        run: |
+          exec > >(tee -a pr-follow-up.log) 2>&1
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          repo = Path('.').resolve()
+          data = json.loads(Path('codex-edits.json').read_text())
+          edits = data.get('edits', [])
+
+          for edit in edits:
+              rel = edit['path']
+              target = (repo / rel).resolve()
+              try:
+                  target.relative_to(repo)
+              except ValueError as exc:
+                  raise SystemExit(f'Edit path escapes repository: {rel}') from exc
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(edit['content'])
+          PY
+
+          if git diff --quiet; then
+            echo 'Codex did not produce any repository changes.' >&2
+            exit 1
+          fi
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Validate changes
+        shell: bash
+        run: |
+          exec > >(tee -a pr-follow-up.log) 2>&1
+          set -euo pipefail
+          uv sync --dev
+          uv run python -m compileall src tests
+          uv run pytest
+
+      - name: Commit and push follow-up changes
+        shell: bash
+        run: |
+          exec > >(tee -a pr-follow-up.log) 2>&1
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .
+          git commit -m "fix: address pull request feedback"
+          git push origin HEAD:${{ steps.pr_context.outputs.head_ref }}
+
+      - name: Comment success
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const prNumber = Number('${{ steps.pr_number.outputs.number }}');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: 'Codex addressed the latest PR feedback and pushed an update to this branch.',
+            })
+
+      - name: Comment failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            let logTail = 'No follow-up log captured.';
+            if (fs.existsSync('pr-follow-up.log')) {
+              const lines = fs.readFileSync('pr-follow-up.log', 'utf8').trim().split('\n');
+              logTail = lines.slice(-80).join('\n') || logTail;
+            }
+            const prNumber = Number('${{ steps.pr_number.outputs.number }}');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: [
+                'Automated PR follow-up failed while trying to address the latest feedback.',
+                '',
+                'Recent failure output:',
+                '```text',
+                logTail,
+                '```',
+              ].join('\n'),
+            })
