@@ -1,6 +1,6 @@
 [project]
 name = "widget"
-version = "0.2.10"
+version = "0.2.11"
 description = "FastAPI widget service scaffolded with uv"
 authors = [
     { name = "Zack Teater", email = "zteater@gmail.com" }
