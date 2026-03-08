@@ -272,11 +272,17 @@ jobs:
             const repo = context.repo.repo;
             const branch = process.env.BRANCH_NAME;
             const issueNumber = context.payload.issue.number;
-            const title = `feat: implement issue #${issueNumber}`;
+            const issueTitle = (context.payload.issue.title || `Issue #${issueNumber}`).trim();
+            const issueBody = (context.payload.issue.body || '').trim();
+            const title = issueTitle;
             const body = [
               `Closes #${issueNumber}`,
               '',
-              'This PR was generated from the approved issue plan.',
+              '## Summary',
+              issueTitle,
+              '',
+              '## Issue Details',
+              issueBody || 'No issue description was provided.',
             ].join('\n');
 
             const existing = await github.paginate(github.rest.pulls.list, {
