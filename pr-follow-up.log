@@ -1,0 +1,77 @@
+Generated edit plan:
+{
+  "edits": [
+    {
+      "path": "codex-edits.json",
+      "content": ""
+    },
+    {
+      "path": "codex-raw.txt",
+      "content": ""
+    },
+    {
+      "path": "implementation.log",
+      "content": ""
+    },
+    {
+      "path": "repo-context.txt",
+      "content": ""
+    }
+  ]
+}
+Using CPython 3.12.12 interpreter at: /opt/hostedtoolcache/Python/3.12.12/x64/bin/python3.12
+Creating virtual environment at: .venv
+Resolved 24 packages in 0.64ms
+   Building widget @ file:///home/runner/work/widget/widget
+      Built widget @ file:///home/runner/work/widget/widget
+Downloading pydantic-core (2.0MiB)
+Downloading ruff (10.7MiB)
+Downloading pygments (1.2MiB)
+ Downloaded pydantic-core
+ Downloaded ruff
+ Downloaded pygments
+Prepared 23 packages in 247ms
+Installed 23 packages in 21ms
+ + annotated-doc==0.0.4
+ + annotated-types==0.7.0
+ + anyio==4.12.1
+ + certifi==2026.2.25
+ + click==8.3.1
+ + fastapi==0.135.1
+ + h11==0.16.0
+ + httpcore==1.0.9
+ + httpx==0.28.1
+ + idna==3.11
+ + iniconfig==2.3.0
+ + packaging==26.0
+ + pluggy==1.6.0
+ + pydantic==2.12.5
+ + pydantic-core==2.41.5
+ + pygments==2.19.2
+ + pytest==9.0.2
+ + ruff==0.15.5
+ + starlette==0.52.1
+ + typing-extensions==4.15.0
+ + typing-inspection==0.4.2
+ + uvicorn==0.41.0
+ + widget==0.2.12 (from file:///home/runner/work/widget/widget)
+Listing 'src'...
+Listing 'src/widget'...
+Compiling 'src/widget/__init__.py'...
+Compiling 'src/widget/app.py'...
+Compiling 'src/widget/cli.py'...
+Compiling 'src/widget/models.py'...
+Compiling 'src/widget/store.py'...
+Listing 'tests'...
+Compiling 'tests/test_widgets.py'...
+============================= test session starts ==============================
+platform linux -- Python 3.12.12, pytest-9.0.2, pluggy-1.6.0
+rootdir: /home/runner/work/widget/widget
+configfile: pyproject.toml
+testpaths: tests
+plugins: anyio-4.12.1
+collected 2 items
+
+tests/test_widgets.py ..                                                 [100%]
+
+============================== 2 passed in 0.99s ===============================
