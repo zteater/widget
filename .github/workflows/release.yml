@@ -1,4 +1,4 @@
-name: Reusable Release
+name: Release
 
 on:
   workflow_call:
@@ -16,12 +16,6 @@ on:
       sha:
         required: true
         type: string
-      commit_range:
-        required: true
-        type: string
-      intro:
-        required: true
-        type: string
 
 jobs:
   release:
@@ -35,20 +29,11 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.sha }}
 
-      - name: Generate release notes
-        uses: ./.github/actions/conventional-release-notes
-        with:
-          notes_title: Release Notes
-          intro: ${{ inputs.intro }}
-          commit_range: ${{ inputs.commit_range }}
-          output_file: release-notes.md
-
       - name: Promote prerelease to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release edit "${{ inputs.tag }}" \
             --title "${{ inputs.title }}" \
-            --notes-file release-notes.md \
             --latest \
             --prerelease=false

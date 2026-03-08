@@ -1,4 +1,4 @@
-name: Reusable Pre-release
+name: Pre-release
 
 on:
   workflow_call:
@@ -19,9 +19,6 @@ on:
       commit_range:
         required: true
         type: string
-      intro:
-        required: true
-        type: string
 
 jobs:
   prerelease:
@@ -38,8 +35,6 @@ jobs:
       - name: Generate prerelease notes
         uses: ./.github/actions/conventional-release-notes
         with:
-          notes_title: Pre-release Notes
-          intro: ${{ inputs.intro }}
           commit_range: ${{ inputs.commit_range }}
           output_file: prerelease-notes.md
 
