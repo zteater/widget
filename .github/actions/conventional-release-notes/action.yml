@@ -55,7 +55,7 @@ runs:
           local login
           login="$(gh api "repos/${repo}/commits/${full_sha}" --jq '.author.login // empty' 2>/dev/null || true)"
           if [ -n "$login" ]; then
-            printf '[@%s](https://github.com/%s)' "$login" "$login"
+            printf '@%s' "$login"
           else
             printf '%s' "$fallback_author"
           fi
