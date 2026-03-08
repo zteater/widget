@@ -28,7 +28,13 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install dependencies
-        run: make install
+        run: uv sync --dev
+
+      - name: Compile
+        run: uv run python -m compileall src tests
+
+      - name: Test
+        run: uv run pytest
 
       - name: Build
-        run: make build
+        run: uv build
