@@ -85,20 +85,19 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Comment start
+      - name: React to approval comment
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
           script: |
-            await github.rest.issues.createComment({
+            await github.rest.reactions.createForIssueComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: context.payload.issue.number,
-              body: ':rocket: Implementation approved. Starting automated work now.',
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
             })
 
-      - name: Generate implementation patch with Codex
-        id: codex
+      - name: Generate implementation edits with Codex
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
@@ -147,7 +146,7 @@ jobs:
           raw_text="$(printf '%s' "$api_response" | jq -r '[.output[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text] | join("\n\n")')"
 
           if [ -z "$raw_text" ] || [ "$raw_text" = "null" ]; then
-            echo "OpenAI response did not contain patch text" >&2
+            echo "OpenAI response did not contain edit instructions" >&2
             printf '%s\n' "$api_response" >&2
             exit 1
           fi
@@ -155,42 +154,43 @@ jobs:
           printf '%s\n' "$raw_text" > codex-raw.txt
 
           python3 - <<'PY'
+          import json
           from pathlib import Path
-          raw = Path('codex-raw.txt').read_text()
-          text = raw.strip()
-          patch = text
-          if '```' in text:
-              lines = text.splitlines()
-              inside = False
-              captured = []
-              for line in lines:
-                  if line.startswith('```'):
-                      inside = not inside
-                      continue
-                  if inside:
-                      captured.append(line)
-              if captured:
-                  patch = '\n'.join(captured).strip()
-          if 'diff --git ' in patch:
-              patch = patch[patch.index('diff --git '):]
-          Path('codex.patch').write_text(patch + ('\n' if patch and not patch.endswith('\n') else ''))
+
+          raw = Path('codex-raw.txt').read_text().strip()
+          if raw.startswith('```'):
+              lines = raw.splitlines()
+              if lines and lines[0].startswith('```'):
+                  lines = lines[1:]
+              if lines and lines[-1].startswith('```'):
+                  lines = lines[:-1]
+              raw = '\n'.join(lines).strip()
+
+          data = json.loads(raw)
+          edits = data.get('edits', [])
+          if not isinstance(edits, list):
+              raise SystemExit('JSON response must contain an edits array.')
+
+          normalized = []
+          for index, edit in enumerate(edits, start=1):
+              if not isinstance(edit, dict):
+                  raise SystemExit(f'Edit #{index} must be an object.')
+              path = edit.get('path')
+              action = edit.get('action')
+              content = edit.get('content')
+              if not path or not isinstance(path, str):
+                  raise SystemExit(f'Edit #{index} is missing a valid path.')
+              if action != 'write':
+                  raise SystemExit(f'Edit #{index} must use action "write".')
+              if not isinstance(content, str):
+                  raise SystemExit(f'Edit #{index} is missing string content.')
+              normalized.append({'path': path, 'content': content})
+
+          Path('codex-edits.json').write_text(json.dumps({'edits': normalized}, indent=2) + '\n')
           PY
 
-          if ! grep -q '^diff --git ' codex.patch; then
-            echo "Codex response did not contain a valid git patch header." >&2
-            echo "First 80 lines of raw output:" >&2
-            sed -n '1,80p' codex-raw.txt >&2
-            exit 1
-          fi
-
-          if ! git apply --check codex.patch; then
-            echo "git apply --check failed for extracted patch." >&2
-            echo "First 80 lines of extracted patch:" >&2
-            sed -n '1,80p' codex.patch >&2
-            echo "First 80 lines of raw model output:" >&2
-            sed -n '1,80p' codex-raw.txt >&2
-            exit 1
-          fi
+          echo 'Generated edit plan:'
+          sed -n '1,120p' codex-edits.json
 
       - name: Create implementation branch
         env:
@@ -201,12 +201,35 @@ jobs:
           set -euo pipefail
           git checkout -B "$BRANCH_NAME"
 
-      - name: Apply patch
+      - name: Apply edits
         shell: bash
         run: |
           exec > >(tee -a implementation.log) 2>&1
           set -euo pipefail
-          git apply --reject --whitespace=fix codex.patch
+
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          repo = Path('.').resolve()
+          data = json.loads(Path('codex-edits.json').read_text())
+          edits = data.get('edits', [])
+
+          for edit in edits:
+              rel = edit['path']
+              target = (repo / rel).resolve()
+              try:
+                  target.relative_to(repo)
+              except ValueError as exc:
+                  raise SystemExit(f'Edit path escapes repository: {rel}') from exc
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(edit['content'])
+          PY
+
+          if git diff --quiet; then
+            echo 'Codex did not produce any repository changes.' >&2
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -314,7 +337,7 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
               body: [
-                'Implementation was approved, but the automated patch/apply/test flow failed.',
+                'Implementation was approved, but the automated apply/test flow failed.',
                 '',
                 'Recent failure output:',
                 '```text',
