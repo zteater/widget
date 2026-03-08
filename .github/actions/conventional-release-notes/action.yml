@@ -18,45 +18,99 @@ runs:
   steps:
     - name: Generate notes
       shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
 
         commit_range="${{ inputs.commit_range }}"
         output_file="${{ inputs.output_file }}"
         exclude_pattern="${{ inputs.exclude_pattern }}"
+        repo="${{ github.repository }}"
 
-        all_commits="$(git log "$commit_range" --format='%s%x09%h%x09%an' | grep -Ev "$exclude_pattern" || true)"
+        all_commits="$(git log "$commit_range" --format='%s%x09%h%x09%H%x09%an' | grep -Ev "$exclude_pattern" || true)"
 
         : > "$output_file"
 
-        normalize_matches() {
-          perl -pe 's/^([a-z]+)(\([^)]+\))?(!)?:\s+/- /; s/\t/ (/; s/\t/, /; s/$/)/'
-        }
+        features_file="$(mktemp)"
+        fixes_file="$(mktemp)"
+        performance_file="$(mktemp)"
+        refactors_file="$(mktemp)"
+        documentation_file="$(mktemp)"
+        tests_file="$(mktemp)"
+        build_file="$(mktemp)"
+        ci_file="$(mktemp)"
+        chores_file="$(mktemp)"
+        other_file="$(mktemp)"
 
-        add_section() {
-          local heading="$1"
-          local pattern="$2"
-          local matches
-          matches="$(printf '%s\n' "$all_commits" | grep -E "^${pattern}" | normalize_matches || true)"
-          if [ -n "$matches" ]; then
-            printf '## %s\n%s\n\n' "$heading" "$matches" >> "$output_file"
+        cleanup() {
+          rm -f "$features_file" "$fixes_file" "$performance_file" "$refactors_file" \
+            "$documentation_file" "$tests_file" "$build_file" "$ci_file" "$chores_file" "$other_file"
+        }
+        trap cleanup EXIT
+
+        author_label() {
+          local full_sha="$1"
+          local fallback_author="$2"
+          local login
+          login="$(gh api "repos/${repo}/commits/${full_sha}" --jq '.author.login // empty' 2>/dev/null || true)"
+          if [ -n "$login" ]; then
+            printf '[@%s](https://github.com/%s)' "$login" "$login"
+          else
+            printf '%s' "$fallback_author"
           fi
         }
 
-        add_section 'Features' 'feat(\([^)]+\))?!?:'
-        add_section 'Fixes' 'fix(\([^)]+\))?!?:'
-        add_section 'Performance' 'perf(\([^)]+\))?!?:'
-        add_section 'Refactors' 'refactor(\([^)]+\))?!?:'
-        add_section 'Documentation' 'docs(\([^)]+\))?!?:'
-        add_section 'Tests' 'test(\([^)]+\))?!?:'
-        add_section 'Build' 'build(\([^)]+\))?!?:'
-        add_section 'CI' 'ci(\([^)]+\))?!?:'
-        add_section 'Chores' 'chore(\([^)]+\))?!?:'
+        clean_subject() {
+          perl -pe 's/^([a-z]+)(\([^)]+\))?(!)?:\s+//'
+        }
 
-        uncategorized="$(printf '%s\n' "$all_commits" | grep -Ev '^(feat|fix|perf|refactor|docs|test|build|ci|chore)(\([^)]+\))?!?:' | perl -pe 's/^(.+)\t(.+)\t(.+)$/- $1 ($2, $3)/' || true)"
-        if [ -n "$uncategorized" ]; then
-          printf '## Other\n%s\n\n' "$uncategorized" >> "$output_file"
-        fi
+        while IFS=$'\t' read -r subject short_sha full_sha author_name; do
+          [ -n "$subject" ] || continue
+
+          author_md="$(author_label "$full_sha" "$author_name")"
+          if printf '%s\n' "$subject" | grep -Eq '^(feat|fix|perf|refactor|docs|test|build|ci|chore)(\([^)]+\))?!?:'; then
+            cleaned_subject="$(printf '%s\n' "$subject" | clean_subject)"
+          else
+            cleaned_subject="$subject"
+          fi
+
+          line="- ${cleaned_subject} (${short_sha}, ${author_md})"
+
+          case "$subject" in
+            feat*:*|feat!:*) printf '%s\n' "$line" >> "$features_file" ;;
+            fix*:*|fix!:*) printf '%s\n' "$line" >> "$fixes_file" ;;
+            perf*:*|perf!:*) printf '%s\n' "$line" >> "$performance_file" ;;
+            refactor*:*|refactor!:*) printf '%s\n' "$line" >> "$refactors_file" ;;
+            docs*:*|docs!:*) printf '%s\n' "$line" >> "$documentation_file" ;;
+            test*:*|test!:*) printf '%s\n' "$line" >> "$tests_file" ;;
+            build*:*|build!:*) printf '%s\n' "$line" >> "$build_file" ;;
+            ci*:*|ci!:*) printf '%s\n' "$line" >> "$ci_file" ;;
+            chore*:*|chore!:*) printf '%s\n' "$line" >> "$chores_file" ;;
+            *) printf '%s\n' "$line" >> "$other_file" ;;
+          esac
+        done <<< "$all_commits"
+
+        append_section() {
+          local heading="$1"
+          local file="$2"
+          if [ -s "$file" ]; then
+            printf '## %s\n' "$heading" >> "$output_file"
+            cat "$file" >> "$output_file"
+            printf '\n' >> "$output_file"
+          fi
+        }
+
+        append_section 'Features' "$features_file"
+        append_section 'Fixes' "$fixes_file"
+        append_section 'Performance' "$performance_file"
+        append_section 'Refactors' "$refactors_file"
+        append_section 'Documentation' "$documentation_file"
+        append_section 'Tests' "$tests_file"
+        append_section 'Build' "$build_file"
+        append_section 'CI' "$ci_file"
+        append_section 'Chores' "$chores_file"
+        append_section 'Other' "$other_file"
 
         if ! grep -q '^## ' "$output_file"; then
           printf '## Changes\n- No conventional commits found in this range.\n' >> "$output_file"
