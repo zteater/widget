@@ -1,0 +1,213 @@
+Repository file tree:
+./.github/CODEOWNERS
+./.github/actions/conventional-release-notes/action.yml
+./.github/codex/prompts/issue-implement.md
+./.github/codex/prompts/issue-plan.md
+./.github/workflows/build.yml
+./.github/workflows/ci.yml
+./.github/workflows/issue-implementation.yml
+./.github/workflows/issue-planning.yml
+./.github/workflows/prerelease.yml
+./.github/workflows/release.yml
+./.github/workflows/version.yml
+./.gitignore
+./.python-version
+./AGENTS.md
+./Makefile
+./README.md
+./implementation.log
+./pyproject.toml
+./repo-context.txt
+./src/widget/__init__.py
+./src/widget/app.py
+./src/widget/cli.py
+./src/widget/models.py
+./src/widget/store.py
+./tests/test_widgets.py
+./uv.lock
+
+===== BEGIN FILE: AGENTS.md =====
+# AGENTS.md
+
+`widget` is a small FastAPI service for widget CRUD.
+
+## Repo Rules
+
+- Use `make` targets as the primary workflow entrypoints
+- Use `uv` for dependency management and package execution
+- Do not add another task runner or dependency manager unless explicitly requested
+- Keep the app lightweight and simple unless the task requires more infrastructure
+- Keep tests runnable via `make test`
+- Keep build validation runnable via `make build`
+===== END FILE: AGENTS.md =====
+
+===== BEGIN FILE: Makefile =====
+.PHONY: help install run test build h i r t b
+
+help:
+	@printf "widget - FastAPI widget service\n\n"
+	@printf "Usage:\n"
+	@printf "  make <target>\n\n"
+	@printf "Targets:\n"
+	@printf "  help, h      Show this help menu\n"
+	@printf "  install, i   Install app and dev dependencies\n"
+	@printf "  run, r       Run the API on localhost:8080\n"
+	@printf "  test, t      Run the test suite\n"
+	@printf "  build, b     Compile, test, and build distributions\n"
+
+h: help
+
+install:
+	UV_CACHE_DIR=.uv-cache uv sync --dev
+
+i: install
+
+run:
+	UV_CACHE_DIR=.uv-cache uv run uvicorn widget.app:app --host 127.0.0.1 --port 8080 --reload
+
+r: run
+
+test:
+	UV_CACHE_DIR=.uv-cache uv run pytest
+
+t: test
+
+build:
+	UV_CACHE_DIR=.uv-cache uv run python -m compileall src tests
+	UV_CACHE_DIR=.uv-cache uv run pytest
+	UV_CACHE_DIR=.uv-cache uv build
+
+b: build
+===== END FILE: Makefile =====
+
+===== BEGIN FILE: pyproject.toml =====
+[project]
+name = "widget"
+version = "0.2.10"
+description = "FastAPI widget service scaffolded with uv"
+authors = [
+    { name = "Zack Teater", email = "zteater@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.135.1",
+    "uvicorn>=0.41.0",
+]
+
+[project.scripts]
+widget = "widget:main"
+
+[build-system]
+requires = ["uv_build>=0.10.2,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.0.2",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+===== END FILE: pyproject.toml =====
+
+===== BEGIN FILE: .github/workflows/ci.yml =====
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      environment_name: test
+
+  version:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    uses: ./.github/workflows/version.yml
+    with:
+      environment_name: test
+      branch_name: ${{ github.ref_name }}
+    secrets: inherit
+
+  prerelease:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: version
+    uses: ./.github/workflows/prerelease.yml
+    with:
+      environment_name: test
+      tag: ${{ needs.version.outputs.tag }}
+      title: ${{ needs.version.outputs.prerelease_title }}
+      sha: ${{ needs.version.outputs.sha }}
+      commit_range: ${{ needs.version.outputs.commit_range }}
+    secrets: inherit
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - version
+      - prerelease
+    uses: ./.github/workflows/release.yml
+    with:
+      environment_name: prod
+      tag: ${{ needs.version.outputs.tag }}
+      title: ${{ needs.version.outputs.release_title }}
+      sha: ${{ needs.version.outputs.sha }}
+    secrets: inherit
+===== END FILE: .github/workflows/ci.yml =====
+
+===== BEGIN FILE: .github/workflows/build.yml =====
+name: Build
+
+on:
+  workflow_call:
+    inputs:
+      environment_name:
+        required: false
+        type: string
+        default: test
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment_name }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: .python-version
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install dependencies
+        run: uv sync --dev
+
+      - name: Compile
+        run: uv run python -m compileall src tests
+
+      - name: Test
+        run: uv run pytest
+
+      - name: Build
+        run: uv build
+===== END FILE: .github/workflows/build.yml =====
+

@@ -1,0 +1,14 @@
+{
+  "edits": [
+    {
+      "path": "Makefile",
+      "action": "write",
+      "content": ".PHONY: help install run test lint build h i r t l b\n\nhelp:\n\t@printf \"widget - FastAPI widget service\\n\\n\"\n\t@printf \"Usage:\\n\"\n\t@printf \"  make <target>\\n\\n\"\n\t@printf \"Targets:\\n\"\n\t@printf \"  help, h      Show this help menu\\n\"\n\t@printf \"  install, i   Install app and dev dependencies\\n\"\n\t@printf \"  run, r       Run the API on localhost:8080\\n\"\n\t@printf \"  test, t      Run the test suite\\n\"\n\t@printf \"  lint, l      Run the linter\\n\"\n\t@printf \"  build, b     Compile, test, and build distributions\\n\"\n\nh: help\n\ninstall:\n\tUV_CACHE_DIR=.uv-cache uv sync --dev\n\ni: install\n\nrun:\n\tUV_CACHE_DIR=.uv-cache uv run uvicorn widget.app:app --host 127.0.0.1 --port 8080 --reload\n\nr: run\n\ntest:\n\tUV_CACHE_DIR=.uv-cache uv run pytest\n\nt: test\n\nlint:\n\tUV_CACHE_DIR=.uv-cache uv run ruff check .\n\nl: lint\n\nbuild: lint\n\tUV_CACHE_DIR=.uv-cache uv run python -m compileall src tests\n\tUV_CACHE_DIR=.uv-cache uv run pytest\n\tUV_CACHE_DIR=.uv-cache uv build\n\nb: build\n"
+    },
+    {
+      "path": "pyproject.toml",
+      "action": "write",
+      "content": "[project]\nname = \"widget\"\nversion = \"0.2.10\"\ndescription = \"FastAPI widget service scaffolded with uv\"\nauthors = [\n    { name = \"Zack Teater\", email = \"zteater@gmail.com\" }\n]\nrequires-python = \">=3.12\"\ndependencies = [\n    \"fastapi>=0.135.1\",\n    \"uvicorn>=0.41.0\",\n]\n\n[project.scripts]\nwidget = \"widget:main\"\n\n[build-system]\nrequires = [\"uv_build>=0.10.2,<0.11.0\"]\nbuild-backend = \"uv_build\"\n\n[dependency-groups]\ndev = [\n    \"httpx>=0.28.1\",\n    \"pytest>=9.0.2\",\n    \"ruff>=0.6.0\",\n]\n\n[tool.pytest.ini_options]\ntestpaths = [\"tests\"]\n\n[tool.ruff]\n"
+    }
+  ]
+}
